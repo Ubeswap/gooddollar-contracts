@@ -2,9 +2,7 @@
 
 pragma solidity >=0.4.24;
 
-
-// https://docs.synthetix.io/contracts/source/interfaces/istakingrewards
-interface IStakingRewardsCappedV2 {
+interface IGooddollarSavings {
     // Views
     function lastTimeRewardApplicable() external view returns (uint256);
 
@@ -12,15 +10,13 @@ interface IStakingRewardsCappedV2 {
 
     function earned(address account) external view returns (uint256);
 
-    function getRewardForDuration() external view returns (uint256);
-
     function totalSupply() external view returns (uint256);
 
     function balanceOf(address account) external view returns (uint256);
 
     function getEffectiveRewardRate() external view returns (uint256);
 
-    function getWithheldRewardRate() external view returns (uint256);
+    function getDailyRewards() external view returns (uint256);
 
     // Mutative
 
@@ -35,6 +31,4 @@ interface IStakingRewardsCappedV2 {
     function exit() external;
 
     function addToReward(uint256 reward) external;
-
-    function recycleReward() external;
 }
