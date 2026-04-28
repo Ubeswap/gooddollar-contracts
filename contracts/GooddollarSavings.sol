@@ -20,7 +20,7 @@ contract GooddollarSavings is IGooddollarSavings, Ownable, ReentrancyGuard {
 
     // Reward to be paid out per second (constant; only owner can change)
     uint256 public rewardRate;
-    // Maximum reward rate per token per second (in wei per second per token)
+    // Maximum reward rate per token per second (in wei per second per token) (0 = no cap)
     uint256 public maxRewardRatePerToken;
     // Reward tokens still available to be distributed
     uint256 public remainingRewards;
@@ -46,7 +46,7 @@ contract GooddollarSavings is IGooddollarSavings, Ownable, ReentrancyGuard {
         uint256 _dailyRewards,
         uint256 _maxRewardRatePerToken
     ) Ownable(_owner) {
-        require(_gdToken != address(0), "GoodDollar adress is zero");
+        require(_gdToken != address(0), "GoodDollar address is zero");
         gdToken = IERC20(_gdToken);
         _setDailyRewards(_dailyRewards);
         _setMaxRewardRatePerToken(_maxRewardRatePerToken);
@@ -177,7 +177,9 @@ contract GooddollarSavings is IGooddollarSavings, Ownable, ReentrancyGuard {
     }
 
     function exit() external override {
-        withdraw(_balances[msg.sender]);
+        if (_balances[msg.sender] > 0) {
+            withdraw(_balances[msg.sender]);
+        }
         getReward();
     }
 
@@ -201,8 +203,8 @@ contract GooddollarSavings is IGooddollarSavings, Ownable, ReentrancyGuard {
         require(reward > 0, "Cannot add 0 reward");
         remainingRewards += reward;
         require(
-            gdToken.balanceOf(address(this)) >= remainingRewards,
-            "Insufficient reward balance"
+            gdToken.balanceOf(address(this)) >= (remainingRewards + _totalSupply),
+            "Insufficient GoodDollar balance"
         );
         emit RewardAdded(reward);
     }
@@ -216,7 +218,7 @@ contract GooddollarSavings is IGooddollarSavings, Ownable, ReentrancyGuard {
         require(_dailyRewards == 0 || _dailyRewards >= 1 days, "daily rewards too low");
         require(_dailyRewards < type(uint128).max, "invalid amount");
         rewardRate = _dailyRewards / 1 days;
-        emit DailyRewardsUpdated(_dailyRewards);
+        emit DailyRewardsUpdated(rewardRate, _dailyRewards);
     }
 
     // Set maximum reward rate per token per second.
@@ -225,13 +227,17 @@ contract GooddollarSavings is IGooddollarSavings, Ownable, ReentrancyGuard {
     }
 
     function _setMaxRewardRatePerToken(uint256 _value) internal {
-        require(_value < type(uint128).max, "invalid amount");
+        require(_value == 0 || _value >= 1e6, "value too low");
+        require(_value < type(uint128).max, "value too high");
         maxRewardRatePerToken = _value;
         emit MaxRewardRateUpdated(_value);
     }
 
     // Recover non-staking, non-rewards ERC20 tokens accidentally sent to the contract.
-    function recoverERC20(address tokenAddress, uint256 tokenAmount) external onlyOwner {
+    function recoverERC20(
+        address tokenAddress,
+        uint256 tokenAmount
+    ) external onlyOwner nonReentrant {
         require(tokenAddress != address(gdToken), "Cannot withdraw the GoodDollar token");
         IERC20(tokenAddress).safeTransfer(owner(), tokenAmount);
         emit Recovered(tokenAddress, tokenAmount);
@@ -272,5 +278,5 @@ contract GooddollarSavings is IGooddollarSavings, Ownable, ReentrancyGuard {
     event RewardPaid(address indexed user, uint256 reward);
     event Recovered(address token, uint256 amount);
     event MaxRewardRateUpdated(uint256 newMaxRate);
-    event DailyRewardsUpdated(uint256 newDailyRewards);
+    event DailyRewardsUpdated(uint256 rewardRate, uint256 givenDailyRewards);
 }
