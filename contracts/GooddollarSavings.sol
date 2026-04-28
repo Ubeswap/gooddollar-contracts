@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // solhint-disable not-rely-on-time
 
-pragma solidity ^0.8.3;
+pragma solidity ^0.8.23;
 
 import { ReentrancyGuard } from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";

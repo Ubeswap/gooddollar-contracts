@@ -1,6 +1,7 @@
 import { HardhatRuntimeEnvironment } from 'hardhat/types';
 import { DeployFunction, DeployResult } from 'hardhat-deploy/types';
 import { BigNumber } from 'ethers';
+import { parseEther } from 'ethers/lib/utils';
 
 function calculateMaxRewardRatePerToken(maxAprPercent: number, stakingTokenDecimals: number) {
   const secondsPerYear = 365 * 24 * 60 * 60;
@@ -21,13 +22,13 @@ const func: DeployFunction = async function (hre: HardhatRuntimeEnvironment) {
 
   const maxApr = 5;
 
-  await deployments.deploy('GoodDollarStakeV2', {
-    contract: 'StakingRewardsCappedV2',
+  await deployments.deploy('GooddollarSavings', {
+    contract: 'GooddollarSavings',
     from: deployer,
     args: [
       deployer, // address _owner,
-      goodDollarToken, // address _rewardsToken,
-      goodDollarToken, // address _stakingToken,
+      goodDollarToken, // address _gdToken,
+      parseEther('50000'), // uint256 _dailyRewards,
       calculateMaxRewardRatePerToken(maxApr, 18), // uint256 _maxRewardRatePerToken,
     ],
     log: true,
@@ -36,5 +37,5 @@ const func: DeployFunction = async function (hre: HardhatRuntimeEnvironment) {
 };
 
 export default func;
-func.id = 'deploy_good_dollar_stake_v2'; // id required to prevent reexecution
-func.tags = ['GoodDollarStakeV2'];
+func.id = 'deploy_gooddollar_savings'; // id required to prevent reexecution
+func.tags = ['GooddollarSavings'];
