@@ -24,6 +24,10 @@ contract GooddollarSavings is IGooddollarSavings, Ownable, ReentrancyGuard {
     uint256 public maxRewardRatePerToken;
     // Reward tokens still available to be distributed
     uint256 public remainingRewards;
+    // Reward tokens that have been distributed to stakers but not yet claimed.
+    // Incremented when rewards leave `remainingRewards` via `updateReward`,
+    // decremented when stakers claim/compound their rewards.
+    uint256 public totalUnclaimedRewards;
     // Timestamp of the last reward accrual update
     uint256 public lastUpdateTime;
     // Sum of (effective reward rate * dt * 1e18 / total supply)
@@ -160,6 +164,7 @@ contract GooddollarSavings is IGooddollarSavings, Ownable, ReentrancyGuard {
         uint256 reward = rewards[msg.sender];
         if (reward > 0) {
             rewards[msg.sender] = 0;
+            totalUnclaimedRewards -= reward;
             gdToken.safeTransfer(msg.sender, reward);
             emit RewardPaid(msg.sender, reward);
         }
@@ -170,6 +175,7 @@ contract GooddollarSavings is IGooddollarSavings, Ownable, ReentrancyGuard {
         uint256 reward = rewards[msg.sender];
         require(reward > 0, "No rewards to compound");
         rewards[msg.sender] = 0;
+        totalUnclaimedRewards -= reward;
         _totalSupply += reward;
         _balances[msg.sender] += reward;
         emit RewardPaid(msg.sender, reward);
@@ -183,31 +189,24 @@ contract GooddollarSavings is IGooddollarSavings, Ownable, ReentrancyGuard {
         getReward();
     }
 
-    // Permissionless: anyone may add rewards by transferring tokens directly into the contract
-    // and calling this function.
+    // Permissionless: anyone may top up rewards by either:
+    //  - approving and passing `reward > 0` (the contract will pull it via transferFrom), and/or
+    //  - transferring GoodDollar directly to the contract beforehand.
+    // Any token balance in excess of staked + remaining + unclaimed rewards is swept into
+    // `remainingRewards`. This replaces the previous owner-only `notifyRewardAmount` flow.
     function addToReward(uint256 reward) external override nonReentrant updateReward(address(0)) {
-        require(reward > 0, "Cannot add 0 reward");
-        gdToken.safeTransferFrom(msg.sender, address(this), reward);
-        remainingRewards += reward;
-        emit RewardAdded(reward);
+        if (reward > 0) {
+            gdToken.safeTransferFrom(msg.sender, address(this), reward);
+        }
+        uint256 expectedBalance = _totalSupply + remainingRewards + totalUnclaimedRewards;
+        uint256 balance = gdToken.balanceOf(address(this));
+        require(balance > expectedBalance, "No reward to add");
+        uint256 toAdd = balance - expectedBalance;
+        remainingRewards += toAdd;
+        emit RewardAdded(toAdd);
     }
 
     /* ========== RESTRICTED FUNCTIONS ========== */
-
-    // Used by the owner to register reward tokens that were transferred into the contract
-    // directly (e.g. by mistake) without going through addToReward.
-    // This is not recommended and should be used with caution (use addToReward instead!!!)
-    function notifyRewardAmount(
-        uint256 reward
-    ) external onlyOwner nonReentrant updateReward(address(0)) {
-        require(reward > 0, "Cannot add 0 reward");
-        remainingRewards += reward;
-        require(
-            gdToken.balanceOf(address(this)) >= (remainingRewards + _totalSupply),
-            "Insufficient GoodDollar balance"
-        );
-        emit RewardAdded(reward);
-    }
 
     // Set the daily rewards distribution (translates to per-second rewardRate).
     function setDailyRewards(uint256 _dailyRewards) external onlyOwner updateReward(address(0)) {
@@ -256,6 +255,7 @@ contract GooddollarSavings is IGooddollarSavings, Ownable, ReentrancyGuard {
                 if (distributable > 0) {
                     rewardPerTokenStored += (distributable * 1e18) / _totalSupply;
                     remainingRewards -= distributable;
+                    totalUnclaimedRewards += distributable;
                 }
             }
         }
