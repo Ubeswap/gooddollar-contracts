@@ -4,8 +4,6 @@ pragma solidity >=0.4.24;
 
 interface IGooddollarSavings {
     // Views
-    function lastTimeRewardApplicable() external view returns (uint256);
-
     function rewardPerToken() external view returns (uint256);
 
     function earned(address account) external view returns (uint256);

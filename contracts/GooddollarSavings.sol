@@ -66,34 +66,11 @@ contract GooddollarSavings is IGooddollarSavings, Ownable, ReentrancyGuard {
         return _balances[account];
     }
 
-    // Latest timestamp at which rewards can still be applied. Beyond this, the
-    // remaining reward pool would be depleted at the current effective rate.
-    function lastTimeRewardApplicable() public view override returns (uint256) {
-        if (_totalSupply == 0 || remainingRewards == 0) {
-            return lastUpdateTime;
-        }
-        uint256 effectiveRate = getEffectiveRewardRate();
-        if (effectiveRate == 0) {
-            return block.timestamp;
-        }
-        uint256 maxEnd = lastUpdateTime + (remainingRewards / effectiveRate);
-        return Math.min(block.timestamp, maxEnd);
-    }
-
     function rewardPerToken() public view override returns (uint256) {
-        if (_totalSupply == 0 || remainingRewards == 0) {
+        if (_totalSupply == 0) {
             return rewardPerTokenStored;
         }
-        uint256 effectiveRate = getEffectiveRewardRate();
-        if (effectiveRate == 0) {
-            return rewardPerTokenStored;
-        }
-        uint256 timeApplicable = lastTimeRewardApplicable() - lastUpdateTime;
-        uint256 distributable = effectiveRate * timeApplicable;
-        if (distributable > remainingRewards) {
-            distributable = remainingRewards;
-        }
-        return rewardPerTokenStored + (distributable * 1e18) / _totalSupply;
+        return rewardPerTokenStored + (_pendingDistributable() * 1e18) / _totalSupply;
     }
 
     function earned(address account) public view override returns (uint256) {
@@ -145,7 +122,10 @@ contract GooddollarSavings is IGooddollarSavings, Ownable, ReentrancyGuard {
         address recipient
     ) external override nonReentrant updateReward(recipient) {
         require(amount > 0, "Cannot stake 0");
-        require(recipient != address(0), "Cannot stake for zero address");
+        require(
+            recipient != address(0) && recipient != address(this) && recipient != address(gdToken),
+            "invalid address"
+        );
         _totalSupply += amount;
         _balances[recipient] += amount;
         gdToken.safeTransferFrom(msg.sender, address(this), amount);
@@ -238,26 +218,36 @@ contract GooddollarSavings is IGooddollarSavings, Ownable, ReentrancyGuard {
         uint256 tokenAmount
     ) external onlyOwner nonReentrant {
         require(tokenAddress != address(gdToken), "Cannot withdraw the GoodDollar token");
-        IERC20(tokenAddress).safeTransfer(owner(), tokenAmount);
-        emit Recovered(tokenAddress, tokenAmount);
+        IERC20(tokenAddress).safeTransfer(msg.sender, tokenAmount);
+        emit Recovered(tokenAddress, tokenAmount, msg.sender);
+    }
+
+    // Amount of rewards that would be moved from `remainingRewards` into
+    // `totalUnclaimedRewards` if `updateReward` ran at this exact block.
+    // Single source of truth for both the view (`rewardPerToken`) and the
+    // modifier so they cannot disagree on the depletion-block remainder.
+    function _pendingDistributable() internal view returns (uint256) {
+        if (_totalSupply == 0 || remainingRewards == 0) {
+            return 0;
+        }
+        uint256 effectiveRate = getEffectiveRewardRate();
+        if (effectiveRate == 0) {
+            return 0;
+        }
+        uint256 distributable = effectiveRate * (block.timestamp - lastUpdateTime);
+        if (distributable > remainingRewards) {
+            distributable = remainingRewards;
+        }
+        return distributable;
     }
 
     /* ========== MODIFIERS ========== */
     modifier updateReward(address account) {
-        if (_totalSupply > 0 && remainingRewards > 0) {
-            uint256 effectiveRate = getEffectiveRewardRate();
-            if (effectiveRate > 0) {
-                uint256 timeElapsed = block.timestamp - lastUpdateTime;
-                uint256 distributable = effectiveRate * timeElapsed;
-                if (distributable > remainingRewards) {
-                    distributable = remainingRewards;
-                }
-                if (distributable > 0) {
-                    rewardPerTokenStored += (distributable * 1e18) / _totalSupply;
-                    remainingRewards -= distributable;
-                    totalUnclaimedRewards += distributable;
-                }
-            }
+        uint256 distributable = _pendingDistributable();
+        if (distributable > 0) {
+            rewardPerTokenStored += (distributable * 1e18) / _totalSupply;
+            remainingRewards -= distributable;
+            totalUnclaimedRewards += distributable;
         }
 
         lastUpdateTime = block.timestamp;
@@ -276,7 +266,7 @@ contract GooddollarSavings is IGooddollarSavings, Ownable, ReentrancyGuard {
     event StakedFor(address indexed staker, address indexed recipient, uint256 amount);
     event Withdrawn(address indexed user, uint256 amount);
     event RewardPaid(address indexed user, uint256 reward);
-    event Recovered(address token, uint256 amount);
+    event Recovered(address token, uint256 amount, address receiver);
     event MaxRewardRateUpdated(uint256 newMaxRate);
     event DailyRewardsUpdated(uint256 rewardRate, uint256 givenDailyRewards);
 }
