@@ -18,6 +18,8 @@ interface IGooddollarSavings {
 
     function getDailyRewards() external view returns (uint256);
 
+    function periodFinish() external view returns (uint256);
+
     // Mutative
 
     function stake(uint256 amount) external;

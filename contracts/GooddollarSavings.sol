@@ -52,8 +52,8 @@ contract GooddollarSavings is IGooddollarSavings, Ownable, ReentrancyGuard {
         require(_rewardsToken != address(0), "Rewards token cannot be zero address");
         rewardsToken = IERC20(_rewardsToken);
         stakingToken = IERC20(_stakingToken);
-        rewardRate = _dailyRewards / 1 days;
-        maxRewardRatePerToken = _maxRewardRatePerToken;
+        _setDailyRewards(_dailyRewards);
+        _setMaxRewardRatePerToken(_maxRewardRatePerToken);
     }
 
     /* ========== VIEWS ========== */
@@ -89,7 +89,11 @@ contract GooddollarSavings is IGooddollarSavings, Ownable, ReentrancyGuard {
             return rewardPerTokenStored;
         }
         uint256 timeApplicable = lastTimeRewardApplicable() - lastUpdateTime;
-        return rewardPerTokenStored + (effectiveRate * timeApplicable * 1e18) / _totalSupply;
+        uint256 distributable = effectiveRate * timeApplicable;
+        if (distributable > remainingRewards) {
+            distributable = remainingRewards;
+        }
+        return rewardPerTokenStored + (distributable * 1e18) / _totalSupply;
     }
 
     function earned(address account) public view override returns (uint256) {
@@ -109,6 +113,21 @@ contract GooddollarSavings is IGooddollarSavings, Ownable, ReentrancyGuard {
 
     function getDailyRewards() external view override returns (uint256) {
         return rewardRate * 1 days;
+    }
+
+    // Timestamp when the current reward pool is expected to be depleted.
+    // Returns 0 when rewards are not actively being distributed.
+    function periodFinish() external view override returns (uint256) {
+        if (_totalSupply == 0 || remainingRewards == 0) {
+            return remainingRewards == 0 ? lastUpdateTime : 0;
+        }
+
+        uint256 effectiveRate = getEffectiveRewardRate();
+        if (effectiveRate == 0) {
+            return 0;
+        }
+
+        return lastUpdateTime + Math.ceilDiv(remainingRewards, effectiveRate);
     }
 
     /* ========== MUTATIVE FUNCTIONS ========== */
@@ -168,6 +187,7 @@ contract GooddollarSavings is IGooddollarSavings, Ownable, ReentrancyGuard {
 
     // Used by the owner to register reward tokens that were transferred into the contract
     // directly (e.g. by mistake) without going through addToReward.
+    // This is not recommended and should be used with caution (use addToReward instead!!!)
     function notifyRewardAmount(
         uint256 reward
     ) external onlyOwner nonReentrant updateReward(address(0)) {
@@ -182,16 +202,25 @@ contract GooddollarSavings is IGooddollarSavings, Ownable, ReentrancyGuard {
 
     // Set the daily rewards distribution (translates to per-second rewardRate).
     function setDailyRewards(uint256 _dailyRewards) external onlyOwner updateReward(address(0)) {
+        _setDailyRewards(_dailyRewards);
+    }
+
+    function _setDailyRewards(uint256 _dailyRewards) internal {
+        require(_dailyRewards == 0 || _dailyRewards >= 1 days, "daily rewards too low");
+        require(_dailyRewards < type(uint128).max, "invalid amount");
         rewardRate = _dailyRewards / 1 days;
         emit DailyRewardsUpdated(_dailyRewards);
     }
 
     // Set maximum reward rate per token per second.
-    function setMaxRewardRatePerToken(
-        uint256 _maxRewardRatePerToken
-    ) external onlyOwner updateReward(address(0)) {
-        maxRewardRatePerToken = _maxRewardRatePerToken;
-        emit MaxRewardRateUpdated(_maxRewardRatePerToken);
+    function setMaxRewardRatePerToken(uint256 _value) external onlyOwner updateReward(address(0)) {
+        _setMaxRewardRatePerToken(_value);
+    }
+
+    function _setMaxRewardRatePerToken(uint256 _value) internal {
+        require(_value < type(uint128).max, "invalid amount");
+        maxRewardRatePerToken = _value;
+        emit MaxRewardRateUpdated(_value);
     }
 
     // Recover non-staking, non-rewards ERC20 tokens accidentally sent to the contract.
@@ -203,7 +232,6 @@ contract GooddollarSavings is IGooddollarSavings, Ownable, ReentrancyGuard {
     }
 
     /* ========== MODIFIERS ========== */
-
     modifier updateReward(address account) {
         if (_totalSupply > 0 && remainingRewards > 0) {
             uint256 effectiveRate = getEffectiveRewardRate();
