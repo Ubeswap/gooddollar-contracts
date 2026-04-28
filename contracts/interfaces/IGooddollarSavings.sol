@@ -30,6 +30,8 @@ interface IGooddollarSavings {
 
     function getReward() external;
 
+    function compound() external;
+
     function exit() external;
 
     function addToReward(uint256 reward) external;

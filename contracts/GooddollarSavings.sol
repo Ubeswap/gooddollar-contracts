@@ -8,14 +8,13 @@ import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
-
 import "./interfaces/IGooddollarSavings.sol";
 
 contract GooddollarSavings is IGooddollarSavings, Ownable, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
-    IERC20 public immutable stakingToken;
-    IERC20 public immutable rewardsToken;
+    // GoodDollar token address
+    IERC20 public immutable gdToken;
 
     /* ========== STATE VARIABLES ========== */
 
@@ -43,15 +42,12 @@ contract GooddollarSavings is IGooddollarSavings, Ownable, ReentrancyGuard {
 
     constructor(
         address _owner,
-        address _rewardsToken,
-        address _stakingToken,
+        address _gdToken,
         uint256 _dailyRewards,
         uint256 _maxRewardRatePerToken
     ) Ownable(_owner) {
-        require(_stakingToken != address(0), "Staking token cannot be zero address");
-        require(_rewardsToken != address(0), "Rewards token cannot be zero address");
-        rewardsToken = IERC20(_rewardsToken);
-        stakingToken = IERC20(_stakingToken);
+        require(_gdToken != address(0), "GoodDollar adress is zero");
+        gdToken = IERC20(_gdToken);
         _setDailyRewards(_dailyRewards);
         _setMaxRewardRatePerToken(_maxRewardRatePerToken);
     }
@@ -136,7 +132,7 @@ contract GooddollarSavings is IGooddollarSavings, Ownable, ReentrancyGuard {
         require(amount > 0, "Cannot stake 0");
         _totalSupply += amount;
         _balances[msg.sender] += amount;
-        stakingToken.safeTransferFrom(msg.sender, address(this), amount);
+        gdToken.safeTransferFrom(msg.sender, address(this), amount);
         emit Staked(msg.sender, amount);
     }
 
@@ -148,7 +144,7 @@ contract GooddollarSavings is IGooddollarSavings, Ownable, ReentrancyGuard {
         require(recipient != address(0), "Cannot stake for zero address");
         _totalSupply += amount;
         _balances[recipient] += amount;
-        stakingToken.safeTransferFrom(msg.sender, address(this), amount);
+        gdToken.safeTransferFrom(msg.sender, address(this), amount);
         emit StakedFor(msg.sender, recipient, amount);
     }
 
@@ -156,7 +152,7 @@ contract GooddollarSavings is IGooddollarSavings, Ownable, ReentrancyGuard {
         require(amount > 0, "Cannot withdraw 0");
         _totalSupply -= amount;
         _balances[msg.sender] -= amount;
-        stakingToken.safeTransfer(msg.sender, amount);
+        gdToken.safeTransfer(msg.sender, amount);
         emit Withdrawn(msg.sender, amount);
     }
 
@@ -164,9 +160,20 @@ contract GooddollarSavings is IGooddollarSavings, Ownable, ReentrancyGuard {
         uint256 reward = rewards[msg.sender];
         if (reward > 0) {
             rewards[msg.sender] = 0;
-            rewardsToken.safeTransfer(msg.sender, reward);
+            gdToken.safeTransfer(msg.sender, reward);
             emit RewardPaid(msg.sender, reward);
         }
+    }
+
+    // Claim pending rewards and immediately re-stake them in a single tx.
+    function compound() external override nonReentrant updateReward(msg.sender) {
+        uint256 reward = rewards[msg.sender];
+        require(reward > 0, "No rewards to compound");
+        rewards[msg.sender] = 0;
+        _totalSupply += reward;
+        _balances[msg.sender] += reward;
+        emit RewardPaid(msg.sender, reward);
+        emit Staked(msg.sender, reward);
     }
 
     function exit() external override {
@@ -178,7 +185,7 @@ contract GooddollarSavings is IGooddollarSavings, Ownable, ReentrancyGuard {
     // and calling this function.
     function addToReward(uint256 reward) external override nonReentrant updateReward(address(0)) {
         require(reward > 0, "Cannot add 0 reward");
-        rewardsToken.safeTransferFrom(msg.sender, address(this), reward);
+        gdToken.safeTransferFrom(msg.sender, address(this), reward);
         remainingRewards += reward;
         emit RewardAdded(reward);
     }
@@ -194,7 +201,7 @@ contract GooddollarSavings is IGooddollarSavings, Ownable, ReentrancyGuard {
         require(reward > 0, "Cannot add 0 reward");
         remainingRewards += reward;
         require(
-            rewardsToken.balanceOf(address(this)) >= remainingRewards,
+            gdToken.balanceOf(address(this)) >= remainingRewards,
             "Insufficient reward balance"
         );
         emit RewardAdded(reward);
@@ -225,8 +232,7 @@ contract GooddollarSavings is IGooddollarSavings, Ownable, ReentrancyGuard {
 
     // Recover non-staking, non-rewards ERC20 tokens accidentally sent to the contract.
     function recoverERC20(address tokenAddress, uint256 tokenAmount) external onlyOwner {
-        require(tokenAddress != address(stakingToken), "Cannot withdraw the staking token");
-        require(tokenAddress != address(rewardsToken), "Cannot withdraw the rewards token");
+        require(tokenAddress != address(gdToken), "Cannot withdraw the GoodDollar token");
         IERC20(tokenAddress).safeTransfer(owner(), tokenAmount);
         emit Recovered(tokenAddress, tokenAmount);
     }
