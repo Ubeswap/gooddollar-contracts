@@ -10,6 +10,34 @@ import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.s
 import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
 import "./interfaces/IGooddollarSavings.sol";
 
+/**
+ * @title GooddollarSavings
+ * @notice Staking contract for GoodDollar (GD) tokens that distributes GD rewards to stakers.
+ * @dev Rewards are determined by two parameters set by the owner:
+ *
+ *  1. `rewardRate` (configured via `setDailyRewards`):
+ *     The target amount of GD distributed across all stakers per second. This is the
+ *     pool-wide payout pace and acts as the global cap on how fast `remainingRewards`
+ *     can be drained, regardless of how much is staked.
+ *
+ *  2. `maxRewardRatePerToken` (the max APR cap):
+ *     The maximum reward rate paid per staked token per second (in wei per second per
+ *     staked token, scaled by 1e18). This effectively caps the per-staker APR so that
+ *     when the total stake is small, individual stakers do not earn an unbounded share
+ *     of `rewardRate`. A value of 0 disables this cap.
+ *
+ * The effective per-second distribution rate used for accrual is:
+ *
+ *     effectiveRate = min(rewardRate, maxRewardRatePerToken * totalSupply / 1e18)
+ *
+ * As a result:
+ *  - When `totalSupply` is large enough that `maxRewardRatePerToken * totalSupply / 1e18`
+ *    >= `rewardRate`, the daily reward rate is the binding constraint and the pool pays
+ *    out at the configured daily pace.
+ *  - When `totalSupply` is small, the per-token max APR is the binding constraint and the
+ *    pool pays out more slowly (extending the lifetime of `remainingRewards`) so that no
+ *    individual staker exceeds the configured maximum APR.
+ */
 contract GooddollarSavings is IGooddollarSavings, Ownable, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
