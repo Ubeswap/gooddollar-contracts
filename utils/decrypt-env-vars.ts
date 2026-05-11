@@ -1,3 +1,5 @@
 import { decryptVars } from './encrypted-vars';
 
-decryptVars(process.env);
+if (!process.argv.includes('compile')) {
+  decryptVars(process.env);
+}
