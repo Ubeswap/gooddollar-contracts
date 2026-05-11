@@ -12,12 +12,22 @@ function calculateMaxRewardRatePerToken(maxAprPercent: number, stakingTokenDecim
     .div(secondsPerYear);
   return maxRewardRatePerToken;
 }
+function getGooddollarTokenAddress(networkName: string): string {
+  switch (networkName) {
+    case 'celo_mainnet':
+      return '0x62B8B11039FcfE5aB0C56E502b1C372A3d2a9c7A';
+    case 'xdc_mainnet':
+      return '0xEC2136843a983885AebF2feB3931F73A8eBEe50c';
+    default:
+      throw new Error(`Unsupported network: ${networkName}`);
+  }
+}
 
 const func: DeployFunction = async function (hre: HardhatRuntimeEnvironment) {
   const { deployments, getNamedAccounts } = hre;
   const { deployer } = await getNamedAccounts();
 
-  const goodDollarToken = '0x62B8B11039FcfE5aB0C56E502b1C372A3d2a9c7A';
+  const goodDollarToken = getGooddollarTokenAddress(hre.network.name);
   console.log({ deployer, goodDollarToken });
 
   const maxApr = 5;
