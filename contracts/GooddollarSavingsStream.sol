@@ -8,6 +8,7 @@ import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
 import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
 import { Context } from "@openzeppelin/contracts/utils/Context.sol";
 import { ERC2771Context } from "@openzeppelin/contracts/metatx/ERC2771Context.sol";
+import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 import { ISuperToken } from "@superfluid-finance/ethereum-contracts/contracts/interfaces/superfluid/ISuperToken.sol";
 import { ISuperfluidPool } from "@superfluid-finance/ethereum-contracts/contracts/interfaces/agreements/gdav1/ISuperfluidPool.sol";
@@ -105,12 +106,12 @@ contract GooddollarSavingsStream is
     /// @notice The vault that holds staked principal in isolation.
     StakingVault public immutable vault;
 
+    /// @notice The Superfluid GDA distribution pool for reward streaming.
+    ISuperfluidPool public immutable pool;
+
     // ═══════════════════════════════════════════════════════════════════════
     //                          STATE
     // ═══════════════════════════════════════════════════════════════════════
-
-    /// @notice The Superfluid GDA distribution pool for reward streaming.
-    ISuperfluidPool public pool;
 
     /// @notice Target reward rate: tokens distributed per second (global cap).
     uint256 public rewardRate;
@@ -148,7 +149,6 @@ contract GooddollarSavingsStream is
     error CannotWithdrawZero();
     error InsufficientStake();
     error InvalidAddress();
-    error InvalidAmount();
     error NoRewardToAdd();
     error CannotRecoverStakingToken();
 
@@ -281,7 +281,6 @@ contract GooddollarSavingsStream is
 
         // 1. Transfer tokens from user → this contract → vault.
         superToken.transferFrom(sender, address(this), amount);
-        superToken.approve(address(vault), amount);
         vault.deposit(amount);
 
         // 2. Update bookkeeping.
@@ -406,7 +405,7 @@ contract GooddollarSavingsStream is
     ) external onlyOwner nonReentrant {
         if (tokenAddress == address(superToken)) revert CannotRecoverStakingToken();
         address receiver = owner();
-        ISuperToken(tokenAddress).transfer(receiver, tokenAmount);
+        IERC20(tokenAddress).transfer(receiver, tokenAmount);
         emit Recovered(tokenAddress, tokenAmount, receiver);
     }
 
@@ -459,6 +458,9 @@ contract GooddollarSavingsStream is
 
         if (newFlowRate != currentFlowRate) {
             superToken.distributeFlow(address(this), pool, newFlowRate);
+            if (newFlowRate == 0) {
+                emit StreamStopped("insufficient balance");
+            }
             emit FlowRateUpdated(newFlowRate);
         }
     }
