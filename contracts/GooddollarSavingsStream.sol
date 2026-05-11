@@ -6,6 +6,8 @@ pragma solidity ^0.8.23;
 import { ReentrancyGuard } from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
 import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
+import { Context } from "@openzeppelin/contracts/utils/Context.sol";
+import { ERC2771Context } from "@openzeppelin/contracts/metatx/ERC2771Context.sol";
 
 import { ISuperToken } from "@superfluid-finance/ethereum-contracts/contracts/interfaces/superfluid/ISuperToken.sol";
 import { ISuperfluidPool } from "@superfluid-finance/ethereum-contracts/contracts/interfaces/agreements/gdav1/ISuperfluidPool.sol";
@@ -71,7 +73,12 @@ import { IGooddollarSavingsStream } from "./interfaces/IGooddollarSavingsStream.
  *  6. STAKING & REWARD TOKEN ARE THE SAME NATIVE SUPER TOKEN (G$). The vault holds the
  *     staked principal; this contract holds reward balance and streams it out.
  */
-contract GooddollarSavingsStream is IGooddollarSavingsStream, Ownable, ReentrancyGuard {
+contract GooddollarSavingsStream is
+    IGooddollarSavingsStream,
+    Ownable,
+    ERC2771Context,
+    ReentrancyGuard
+{
     using SuperTokenV1Library for ISuperToken;
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -151,16 +158,19 @@ contract GooddollarSavingsStream is IGooddollarSavingsStream, Ownable, Reentranc
 
     /**
      * @param _owner              Contract owner (can set rates, recover tokens).
+     * @param _trustedForwarder   ERC2771 trusted forwarder (the Superfluid host).
+     *                            Enables one-tx UX: stake + connectPool via host.batchCall.
      * @param _superToken         The G$ native Super Token address.
      * @param _dailyRewards       Initial daily reward amount (in token wei).
      * @param _maxRewardRatePerToken  Max reward per staked token per second (1e18 scaled). 0 = no cap.
      */
     constructor(
         address _owner,
+        address _trustedForwarder,
         ISuperToken _superToken,
         uint256 _dailyRewards,
         uint256 _maxRewardRatePerToken
-    ) Ownable(_owner) {
+    ) Ownable(_owner) ERC2771Context(_trustedForwarder) {
         require(address(_superToken) != address(0), "zero token");
 
         superToken = _superToken;
@@ -267,23 +277,24 @@ contract GooddollarSavingsStream is IGooddollarSavingsStream, Ownable, Reentranc
      */
     function stake(uint256 amount) external override nonReentrant {
         if (amount == 0) revert CannotStakeZero();
+        address sender = _msgSender();
 
         // 1. Transfer tokens from user → this contract → vault.
-        superToken.transferFrom(msg.sender, address(this), amount);
+        superToken.transferFrom(sender, address(this), amount);
         superToken.approve(address(vault), amount);
         vault.deposit(amount);
 
         // 2. Update bookkeeping.
         _totalSupply += amount;
-        _balances[msg.sender] += amount;
+        _balances[sender] += amount;
 
         // 3. Update Superfluid pool units for this staker.
-        _updateUnits(msg.sender);
+        _updateUnits(sender);
 
         // 4. Recalculate and apply the stream flow rate (APR cap check).
         _syncFlowRate();
 
-        emit Staked(msg.sender, amount);
+        emit Staked(sender, amount);
     }
 
     /**
@@ -297,8 +308,9 @@ contract GooddollarSavingsStream is IGooddollarSavingsStream, Ownable, Reentranc
             recipient == address(superToken) ||
             recipient == address(vault)
         ) revert InvalidAddress();
+        address sender = _msgSender();
 
-        superToken.transferFrom(msg.sender, address(this), amount);
+        superToken.transferFrom(sender, address(this), amount);
         vault.deposit(amount);
 
         _totalSupply += amount;
@@ -307,7 +319,7 @@ contract GooddollarSavingsStream is IGooddollarSavingsStream, Ownable, Reentranc
         _updateUnits(recipient);
         _syncFlowRate();
 
-        emit StakedFor(msg.sender, recipient, amount);
+        emit StakedFor(sender, recipient, amount);
     }
 
     /**
@@ -316,30 +328,32 @@ contract GooddollarSavingsStream is IGooddollarSavingsStream, Ownable, Reentranc
      */
     function withdraw(uint256 amount) public override nonReentrant {
         if (amount == 0) revert CannotWithdrawZero();
-        if (_balances[msg.sender] < amount) revert InsufficientStake();
+        address sender = _msgSender();
+        if (_balances[sender] < amount) revert InsufficientStake();
 
         // 1. Update bookkeeping.
         _totalSupply -= amount;
-        _balances[msg.sender] -= amount;
+        _balances[sender] -= amount;
 
         // 2. Update pool units.
-        _updateUnits(msg.sender);
+        _updateUnits(sender);
 
         // 3. Recalculate flow rate.
         _syncFlowRate();
 
         // 4. Transfer tokens from vault → user.
-        vault.withdraw(msg.sender, amount);
+        vault.withdraw(sender, amount);
 
-        emit Withdrawn(msg.sender, amount);
+        emit Withdrawn(sender, amount);
     }
 
     /**
      * @notice Withdraw all staked tokens.
      */
     function exit() external override {
-        if (_balances[msg.sender] > 0) {
-            withdraw(_balances[msg.sender]);
+        address sender = _msgSender();
+        if (_balances[sender] > 0) {
+            withdraw(_balances[sender]);
         }
     }
 
@@ -353,7 +367,7 @@ contract GooddollarSavingsStream is IGooddollarSavingsStream, Ownable, Reentranc
      */
     function addToReward(uint256 reward) external override nonReentrant {
         if (reward == 0) revert NoRewardToAdd();
-        superToken.transferFrom(msg.sender, address(this), reward);
+        superToken.transferFrom(_msgSender(), address(this), reward);
 
         // Re-sync the flow rate in case we were throttled due to low balance.
         _syncFlowRate();
@@ -391,8 +405,9 @@ contract GooddollarSavingsStream is IGooddollarSavingsStream, Ownable, Reentranc
         uint256 tokenAmount
     ) external onlyOwner nonReentrant {
         if (tokenAddress == address(superToken)) revert CannotRecoverStakingToken();
-        ISuperToken(tokenAddress).transfer(msg.sender, tokenAmount);
-        emit Recovered(tokenAddress, tokenAmount, msg.sender);
+        address receiver = owner();
+        ISuperToken(tokenAddress).transfer(receiver, tokenAmount);
+        emit Recovered(tokenAddress, tokenAmount, receiver);
     }
 
     /// @notice Emergency: stop all streaming and set flow rate to zero.
@@ -446,6 +461,45 @@ contract GooddollarSavingsStream is IGooddollarSavingsStream, Ownable, Reentranc
             superToken.distributeFlow(address(this), pool, newFlowRate);
             emit FlowRateUpdated(newFlowRate);
         }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //                      ERC2771 OVERRIDES
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /// @dev Resolve diamond inheritance between `Ownable` (uses `Context`) and
+    ///      `ERC2771Context`. The ERC2771 implementation extracts the original
+    ///      caller from the appended calldata when invoked via the trusted
+    ///      forwarder (the Superfluid host).
+
+    function _msgSender()
+        internal
+        view
+        virtual
+        override(Context, ERC2771Context)
+        returns (address)
+    {
+        return ERC2771Context._msgSender();
+    }
+
+    function _msgData()
+        internal
+        view
+        virtual
+        override(Context, ERC2771Context)
+        returns (bytes calldata)
+    {
+        return ERC2771Context._msgData();
+    }
+
+    function _contextSuffixLength()
+        internal
+        view
+        virtual
+        override(Context, ERC2771Context)
+        returns (uint256)
+    {
+        return ERC2771Context._contextSuffixLength();
     }
 
     // ═══════════════════════════════════════════════════════════════════════
