@@ -82,23 +82,13 @@ contract GooddollarSavingsStream is
 {
     using SuperTokenV1Library for ISuperToken;
 
-    // ═══════════════════════════════════════════════════════════════════════
-    //                          CONSTANTS
-    // ═══════════════════════════════════════════════════════════════════════
-
     /// @notice Minimum reward buffer: keep enough for ~4 hours of streaming so
     ///         Superfluid doesn't liquidate the flow before a keeper can react.
     uint256 public constant MIN_STREAM_BUFFER_SECONDS = 4 hours;
 
     /// @notice Scaling factor: pool units = stakedAmount / SCALING_FACTOR.
     ///         Keeps units << flow rate to minimize GDA integer-division dust.
-    ///         Example: if G$ has 18 decimals and SCALING_FACTOR = 1e12,
-    ///         then 1000 G$ staked = 1000e18 / 1e12 = 1_000_000 units.
     uint256 public constant SCALING_FACTOR = 1e12;
-
-    // ═══════════════════════════════════════════════════════════════════════
-    //                          IMMUTABLES
-    // ═══════════════════════════════════════════════════════════════════════
 
     /// @notice The G$ native Super Token (used for both staking and rewards).
     ISuperToken public immutable superToken;
@@ -118,7 +108,7 @@ contract GooddollarSavingsStream is
 
     /// @notice Max reward per staked-token per second (APR cap), scaled by 1e18.
     ///         Set to 0 to disable the cap.
-    ///         Example for 5% APR: 5e16 / 365.25 days ≈ 1_585_489_599_188 (wei/sec/token)
+    ///         Example for 5% APR: 5e16 / 365 days ≈ 1_585_489_599_188 (wei/sec/token)
     uint256 public maxRewardRatePerToken;
 
     /// @notice Total amount of tokens currently staked.
@@ -132,14 +122,12 @@ contract GooddollarSavingsStream is
     // ═══════════════════════════════════════════════════════════════════════
 
     event Staked(address indexed user, uint256 amount);
-    event StakedFor(address indexed staker, address indexed recipient, uint256 amount);
     event Withdrawn(address indexed user, uint256 amount);
-    event RewardAdded(uint256 amount);
+    event RewardAdded(uint256 reward);
     event DailyRewardsUpdated(uint256 rewardRate, uint256 givenDailyRewards);
     event MaxRewardRateUpdated(uint256 newMaxRate);
     event FlowRateUpdated(int96 newFlowRate);
     event Recovered(address token, uint256 amount, address receiver);
-    event StreamStopped(string reason);
 
     // ═══════════════════════════════════════════════════════════════════════
     //                          ERRORS
@@ -318,7 +306,7 @@ contract GooddollarSavingsStream is
         _updateUnits(recipient);
         _syncFlowRate();
 
-        emit StakedFor(sender, recipient, amount);
+        emit Staked(recipient, amount);
     }
 
     /**
@@ -409,13 +397,6 @@ contract GooddollarSavingsStream is
         emit Recovered(tokenAddress, tokenAmount, receiver);
     }
 
-    /// @notice Emergency: stop all streaming and set flow rate to zero.
-    function emergencyStopStream() external onlyOwner {
-        superToken.distributeFlow(address(this), pool, int96(0));
-        emit StreamStopped("emergency");
-        emit FlowRateUpdated(int96(0));
-    }
-
     // ═══════════════════════════════════════════════════════════════════════
     //                      INTERNAL FUNCTIONS
     // ═══════════════════════════════════════════════════════════════════════
@@ -458,9 +439,6 @@ contract GooddollarSavingsStream is
 
         if (newFlowRate != currentFlowRate) {
             superToken.distributeFlow(address(this), pool, newFlowRate);
-            if (newFlowRate == 0) {
-                emit StreamStopped("insufficient balance");
-            }
             emit FlowRateUpdated(newFlowRate);
         }
     }
@@ -502,19 +480,5 @@ contract GooddollarSavingsStream is
         returns (uint256)
     {
         return ERC2771Context._contextSuffixLength();
-    }
-
-    // ═══════════════════════════════════════════════════════════════════════
-    //                      HELPER: APR CALCULATION
-    // ═══════════════════════════════════════════════════════════════════════
-
-    /**
-     * @notice Utility: calculate the maxRewardRatePerToken value for a desired APR.
-     * @param aprBps  Desired APR in basis points (e.g. 500 = 5%).
-     * @return The maxRewardRatePerToken value to pass to the constructor or setter.
-     * @dev Formula: maxRewardRatePerToken = (aprBps * 1e18) / (10_000 * 365.25 days)
-     */
-    function calculateMaxRateForAPR(uint256 aprBps) external pure returns (uint256) {
-        return (aprBps * 1e18) / (10_000 * 365.25 days);
     }
 }
