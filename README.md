@@ -1,4 +1,9 @@
 # Gooddollar Savings Contracts
 
-## XDC Network
-- Gooddollar Savings V2 (StakingRewardsCappedV2) = `0x3BeaaC603b445C7E8AdC46B3867404e1Bde9E047`
+## Celo Mainnet
+
+- Gooddollar Savings (Streaming) = [0x059ee811414230d1Fb157878D2b491240F4D8d3B](https://celoscan.io/address/0x059ee811414230d1Fb157878D2b491240F4D8d3B)
+
+## XDC Mainnet
+
+- Gooddollar Savings = [0x61a1Da2a81FbaE6b1B3A45D94355A6A5c5973A52](https://xdcscan.com/address/0x61a1Da2a81FbaE6b1B3A45D94355A6A5c5973A52)
