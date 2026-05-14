@@ -3,13 +3,14 @@ import { DeployFunction, DeployResult } from 'hardhat-deploy/types';
 import { BigNumber } from 'ethers';
 import { parseEther } from 'ethers/lib/utils';
 
-function calculateMaxRewardRatePerToken(maxAprPercent: number, stakingTokenDecimals: number) {
+// maxAprBps = maxApr * 100
+// Formula: (aprBps * 1e18) / (10_000 * 365 days).
+function calculateMaxRewardRatePerToken(maxApr: number, stakingTokenDecimals: number) {
   const secondsPerYear = 365 * 24 * 60 * 60;
   const oneToken = BigNumber.from(10).pow(stakingTokenDecimals);
   const maxRewardRatePerToken = oneToken
-    .mul(Math.floor(maxAprPercent * 100))
-    .div(10000)
-    .div(secondsPerYear);
+    .mul(Math.floor(maxApr * 100))
+    .div(BigNumber.from(10_000).mul(secondsPerYear));
   return maxRewardRatePerToken;
 }
 function getGooddollarTokenAddress(networkName: string): string {

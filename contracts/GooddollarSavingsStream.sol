@@ -146,8 +146,7 @@ contract GooddollarSavingsStream is
 
     /**
      * @param _owner              Contract owner (can set rates, recover tokens).
-     * @param _trustedForwarder   ERC2771 trusted forwarder (the Superfluid host).
-     *                            Enables one-tx UX: stake + connectPool via host.batchCall.
+     * @param _trustedForwarder   ERC2771 trusted forwarder. pass `host.getERC2771Forwarder()`
      * @param _superToken         The G$ native Super Token address.
      * @param _dailyRewards       Initial daily reward amount (in token wei).
      * @param _maxRewardRatePerToken  Max reward per staked token per second (1e18 scaled). 0 = no cap.
@@ -449,8 +448,7 @@ contract GooddollarSavingsStream is
 
     /// @dev Resolve diamond inheritance between `Ownable` (uses `Context`) and
     ///      `ERC2771Context`. The ERC2771 implementation extracts the original
-    ///      caller from the appended calldata when invoked via the trusted
-    ///      forwarder (the Superfluid host).
+    ///      caller from the appended calldata when invoked via the forwarder.
 
     function _msgSender()
         internal
